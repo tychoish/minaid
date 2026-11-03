@@ -1,0 +1,78 @@
+#+TITLE: minaid.el
+#+AUTHOR: Tycho Garen
+#+LANGUAGE: en
+#+OPTIONS: toc:2 num:nil
+
+Unified minad completion and selection stack for Emacs.
+
+* Overview
+:PROPERTIES:
+:CUSTOM_ID: overview
+:END:
+
+=minaid= provides consolidated configuration and unified lifecycle management for the modern "minad" completion ecosystem:
+
+- *Vertico*: Minimal, vertical minibuffer completion UI with multiform view switching.
+- *Marginalia*: Rich, aligned annotations for minibuffer candidates.
+- *Orderless*: Component-based completion style with regex and literal matching.
+- *Corfu*: Fast in-buffer popup completion overlay with history, quick jump, and indexing.
+- *Cape*: Completion-at-point extensions and composable wrappers (Dabbrev, file, elisp, keywords).
+- *Tempel*: Lightweight template expansion integrated into completion-at-point.
+- *Consult*: Practical search and navigation commands (lazily integrated).
+- *Embark*: Contextual minibuffer and in-buffer actions (on-demand).
+
+** Architectural Principles
+1. *Unified Lifecycle*: =minaid-mode= coordinates activation, buffer hooks, and teardown across all component packages in a single toggle.
+2. *Fast & Lightweight Startup*: Direct interactive completion dependencies (=vertico=, =marginalia=, =orderless=, =corfu=, =cape=, =tempel=) are explicitly required up-front (~25ms), while heavyweight actions (=embark=) and search tools (=consult=) remain lazily loaded.
+3. *Symmetric Teardown*: Disabling =minaid-mode= cleanly restores original completion styles, hooks, advice, and Xref display handlers.
+
+* Installation
+:PROPERTIES:
+:CUSTOM_ID: installation
+:END:
+
+** ELPAish
+Add =minaid= to your package recipe manifest:
+
+#+begin_src emacs-lisp
+(elpaish-register-package
+ 'minaid
+ (elpaish-recipe-path "https://github.com/tychoish/minaid.git")
+ :branch "main"
+ :test-dir "test"
+ :summary "Unified minad completion and selection stack"
+ :url "https://github.com/tychoish/minaid"
+ :keywords '("convenience" "completion" "matching" "tools"))
+#+end_src
+
+** Manual Installation
+Clone this repository to your local load path:
+
+#+begin_src bash
+git clone https://github.com/tychoish/minaid.git ~/src/minaid
+#+end_src
+
+* Usage
+:PROPERTIES:
+:CUSTOM_ID: usage
+:END:
+
+Enable the minor mode in your Emacs configuration:
+
+#+begin_src emacs-lisp
+(require 'minaid)
+(minaid-mode 1)
+#+end_src
+
+** Keymaps & Entry Points
+- =minaid-completion-map= (aliased to =minaid-map=): In-buffer completion actions (e.g. Tempel, Dabbrev, Cape backends).
+- =minaid-consult-map=: Practical search and navigation prefix map.
+- =minaid-consult-search-map=: Line search and filtering submap mounted at =s=.
+- =minaid-global-map=: Global bindings for Consult buffer switcher, find-at-point, and Embark act.
+
+* License
+:PROPERTIES:
+:CUSTOM_ID: license
+:END:
+
+Distributed under the GNU General Public License version 3 (GPL-3.0).

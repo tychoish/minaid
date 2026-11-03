@@ -1,0 +1,6 @@
+/build/
+/.cache/
+*.elc
+*-autoloads.el
+minaid-pkg.el
+.projectile-cache.eld
