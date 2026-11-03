@@ -96,10 +96,9 @@ A complete ~use-package~ configuration block showing keymap bindings and custom 
   (minaid-corfu-auto-delay 0.15)
   (minaid-corfu-text-auto-prefix 2)
   (minaid-corfu-prog-auto-prefix 3)
-  :bind
-  ;; Global navigation and search bindings
-  (:map global-map
-   ("C-c m" . minaid-global-map)
+  :bind-keymap
+  ;; Prefix keymap bindings with autoload trampolines
+  (("C-c m" . minaid-global-map)
    ("C-c c" . minaid-consult-map)
    ("C-c TAB" . minaid-completion-map))
   :config
