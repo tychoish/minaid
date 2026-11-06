@@ -261,10 +261,7 @@
 
 
 (ert-deftest minaid-test/minibuffer-and-isearch-bindings ()
-  "Test that minaid binds built-in minibuffer-local-map and isearch-mode-map at top level."
-  (should (eq (lookup-key minibuffer-local-map (kbd "M-s")) #'consult-history))
-  (should (eq (lookup-key minibuffer-local-map (kbd "M-r")) #'consult-history))
-  (should (eq (lookup-key minibuffer-local-map (kbd "C-c a")) #'marginalia-cycle))
+  "Test that minaid binds built-in isearch-mode-map at top level."
   (should (eq (lookup-key isearch-mode-map (kbd "M-e")) #'consult-isearch-history))
   (should (eq (lookup-key isearch-mode-map (kbd "M-s e")) #'consult-isearch-history))
   (should (eq (lookup-key isearch-mode-map (kbd "M-s l")) #'consult-line))
@@ -281,3 +278,68 @@
 
 (provide 'test-minaid)
 ;;; test-minaid.el ends here
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Minibuffer binding ownership
+
+(defmacro minaid-test--with-clean-minibuffer-map (&rest body)
+  "Run BODY with a scratch `minibuffer-local-map' and fresh saved state."
+  (declare (indent 0))
+  `(let ((minibuffer-local-map (make-sparse-keymap))
+         (minaid--saved-minibuffer-bindings nil))
+     ,@body))
+
+(ert-deftest minaid-test/minibuffer-bindings-not-set-by-load ()
+  "Loading minaid alone leaves minibuffer-local-map bindings unchanged."
+  (let* ((emacs (expand-file-name invocation-name invocation-directory))
+         (root (file-name-directory (locate-library "minaid")))
+         (form "(princ (mapcar (lambda (k) (keymap-lookup minibuffer-local-map k)) '(\"C-g\" \"C-l\" \"C-c a\" \"M-s\" \"M-r\")))")
+         (run (lambda (&rest args)
+                (with-output-to-string
+                  (with-current-buffer standard-output
+                    (apply #'call-process emacs nil t nil "--batch" "-Q"
+                           (append (list "-L" root)
+                                   (seq-mapcat (lambda (dir) (list "-L" dir))
+                                               (seq-filter #'stringp load-path))
+                                   args (list "--eval" form))))))))
+    (should (equal (funcall run)
+                   (funcall run "--eval" "(require 'minaid)")))))
+
+(ert-deftest minaid-test/minibuffer-bindings-round-trip ()
+  "Install sets the contract; restore brings back prior definitions."
+  (minaid-test--with-clean-minibuffer-map
+    (keymap-set minibuffer-local-map "C-g" #'ignore)
+    (keymap-set minibuffer-local-map "C-c a" #'ignore)
+    (minaid--install-minibuffer-bindings)
+    (should (eq (keymap-lookup minibuffer-local-map "C-g") #'minibuffer-keyboard-quit))
+    (should (eq (keymap-lookup minibuffer-local-map "C-l") #'backward-kill-word))
+    (should (eq (keymap-lookup minibuffer-local-map "C-c a") #'marginalia-cycle))
+    (minaid--restore-minibuffer-bindings)
+    (should (eq (keymap-lookup minibuffer-local-map "C-g") #'ignore))
+    (should (eq (keymap-lookup minibuffer-local-map "C-c a") #'ignore))
+    (should-not (keymap-lookup minibuffer-local-map "C-l"))
+    (should-not (keymap-lookup minibuffer-local-map "M-s"))
+    (should-not minaid--saved-minibuffer-bindings)))
+
+(ert-deftest minaid-test/minibuffer-bindings-no-double-ownership ()
+  "A second install must not overwrite the saved prior definitions."
+  (minaid-test--with-clean-minibuffer-map
+    (keymap-set minibuffer-local-map "C-l" #'ignore)
+    (minaid--install-minibuffer-bindings)
+    (minaid--install-minibuffer-bindings)
+    (minaid--restore-minibuffer-bindings)
+    (should (eq (keymap-lookup minibuffer-local-map "C-l") #'ignore))
+    (should (= 1 (length (seq-filter (lambda (b) (equal (car b) "C-c a"))
+                                     minaid-minibuffer-bindings))))))
+
+(ert-deftest minaid-test/minibuffer-quit-once ()
+  "C-g is the standard quit command, invoked exactly once (matches hud wrapper)."
+  (minaid-test--with-clean-minibuffer-map
+    (minaid--install-minibuffer-bindings)
+    (let ((calls nil)
+          (command (keymap-lookup minibuffer-local-map "C-g")))
+      (should (eq command #'minibuffer-keyboard-quit))
+      (cl-letf (((symbol-function 'minibuffer-keyboard-quit)
+                 (lambda () (push 'quit calls))))
+        (funcall command))
+      (should (equal calls '(quit))))))

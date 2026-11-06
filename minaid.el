@@ -237,16 +237,24 @@ Used for `tempel-path' while `minaid-mode' is enabled and by
 (keymap-set minaid-global-map "M-s L" 'consult-line-multi)
 (keymap-set minaid-global-map "M-s m" #'grepx-menu)
 
-;; Minibuffer integration (built-in map)
-(keymap-set minibuffer-local-map "M-s" #'consult-history)
-(keymap-set minibuffer-local-map "M-r" #'consult-history)
-(keymap-set minibuffer-local-map "C-c a" #'marginalia-cycle)
-
 ;; Isearch integration (built-in map)
 (keymap-set isearch-mode-map "M-e" #'consult-isearch-history)
 (keymap-set isearch-mode-map "M-s e" #'consult-isearch-history)
 (keymap-set isearch-mode-map "M-s l" #'consult-line)
 (keymap-set isearch-mode-map "M-s L" #'consult-line-multi)
+
+;; Minibuffer integration (built-in map), installed by `minaid-mode' only.
+(defconst minaid-minibuffer-bindings
+  '(("M-s" . consult-history)
+    ("M-r" . consult-history)
+    ("C-c a" . marginalia-cycle)
+    ("C-g" . minibuffer-keyboard-quit)
+    ("C-l" . backward-kill-word))
+  "Alist of key and command installed in `minibuffer-local-map' by `minaid-mode'.")
+
+(defvar minaid--saved-minibuffer-bindings nil
+  "Alist of key to prior `minibuffer-local-map' definition (or `none').
+Non-nil only while `minaid-mode' owns the minibuffer bindings.")
 
 ;; State tracking for clean mode reversals
 (defvar minaid--saved-completion-styles nil
@@ -511,8 +519,30 @@ Prefers Projectile root, falling back to `project.el' and `default-directory'."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Mode Lifecycle (Enablement / Teardown)
 
+(defun minaid--install-minibuffer-bindings ()
+  "Bind `minaid-minibuffer-bindings', saving prior definitions once."
+  (unless minaid--saved-minibuffer-bindings
+    (setq minaid--saved-minibuffer-bindings
+          (seq-map (lambda (binding)
+                     (cons (car binding)
+                           (or (keymap-lookup minibuffer-local-map (car binding)) 'none)))
+                   minaid-minibuffer-bindings))
+    (seq-do (lambda (binding)
+              (keymap-set minibuffer-local-map (car binding) (cdr binding)))
+            minaid-minibuffer-bindings)))
+
+(defun minaid--restore-minibuffer-bindings ()
+  "Restore the `minibuffer-local-map' definitions saved on enable."
+  (seq-do (lambda (saved)
+            (if (eq (cdr saved) 'none)
+                (keymap-unset minibuffer-local-map (car saved) t)
+              (keymap-set minibuffer-local-map (car saved) (cdr saved))))
+          minaid--saved-minibuffer-bindings)
+  (setq minaid--saved-minibuffer-bindings nil))
+
 (defun minaid--enable ()
   "Perform enablement of all minad completion components."
+  (minaid--install-minibuffer-bindings)
   (minaid--configure-vertico)
   (minaid--configure-orderless)
   (minaid--configure-corfu)
@@ -551,6 +581,7 @@ Prefers Projectile root, falling back to `project.el' and `default-directory'."
 
 (defun minaid--disable ()
   "Tear down all minad completion components and restore original state."
+  (minaid--restore-minibuffer-bindings)
 
   ;; Remove Consult advice
   (advice-remove 'register-preview 'consult-register-window)
