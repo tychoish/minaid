@@ -122,6 +122,27 @@
 (defun test--dummy-inner ()
   'test-result)
 
+(ert-deftest minaid-test/enable-sets-tempel-path ()
+  "Enabling `minaid-mode' points `tempel-path' at `minaid-tempel-directory'."
+  (let ((minaid-tempel-directory "/tmp/minaid-templates")
+        (tempel-path tempel-path)
+        (was-on minaid-mode))
+    (unwind-protect
+        (progn
+          (minaid-mode -1)
+          (minaid-mode 1)
+          (should (equal tempel-path "/tmp/minaid-templates")))
+      (unless was-on
+        (minaid-mode -1)))))
+
+(ert-deftest minaid-test/open-custom-template-file-uses-directory ()
+  "The template opener visits `minaid-tempel-directory'."
+  (let ((minaid-tempel-directory "/tmp/minaid-templates")
+        (opened nil))
+    (cl-letf (((symbol-function 'find-file) (lambda (f) (setq opened f))))
+      (minaid-open-custom-template-file))
+    (should (equal opened "/tmp/minaid-templates"))))
+
 (ert-deftest minaid-test/minaid-cape-capf-wrapper ()
   "Test that minaid-cape-capf-wrapper wraps the inner function cleanly without macro expansion."
   (let ((wrapped (minaid-cape-capf-wrapper #'test--dummy-wrapper #'test--dummy-inner)))

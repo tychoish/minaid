@@ -117,6 +117,15 @@
   :type 'number
   :group 'minaid)
 
+;;;###autoload
+(defcustom minaid-tempel-directory
+  (expand-file-name "templates" user-emacs-directory)
+  "Directory of Tempel templates.
+Used for `tempel-path' while `minaid-mode' is enabled and by
+`minaid-open-custom-template-file'."
+  :type 'directory
+  :group 'minaid)
+
 (defcustom minaid-vertico-count 25
   "Maximum candidate count shown in Vertico minibuffer."
   :type 'integer
@@ -385,7 +394,7 @@ preserving explicit `@` file, `/` command, and TAB completion."
 (defun minaid-open-custom-template-file ()
   "Open the user Tempel templates file."
   (interactive)
-  (find-file (expand-file-name "templates" user-emacs-directory)))
+  (find-file minaid-tempel-directory))
 
 (defun minaid--project-root (&optional may-prompt)
   "Return the project root directory.
@@ -532,6 +541,8 @@ Prefers Projectile root, falling back to `project.el' and `default-directory'."
   (add-hook 'shell-mode-hook #'minaid-corfu-prog-mode-setup)
   (add-hook 'agent-shell-mode-hook #'minaid-corfu-agent-shell-setup)
   (add-hook 'agent-shell-queue-capture-mode-hook #'minaid-corfu-text-mode-setup)
+
+  (setq tempel-path minaid-tempel-directory)
 
   ;; Marginalia command category overrides & nerd icons
   (add-to-list 'marginalia-command-categories '(consult-completion-in-region . imenu))
