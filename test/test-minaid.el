@@ -407,7 +407,9 @@
                 (saved-buf-ignore read-buffer-completion-ignore-case)
                 (saved-file-ignore read-file-name-completion-ignore-case)
                 (saved-pred read-extended-command-predicate)
-                (saved-ispell text-mode-ispell-word-completion)
+                (saved-ispell-bound (boundp 'text-mode-ispell-word-completion))
+                (saved-ispell (and (boundp 'text-mode-ispell-word-completion)
+                                   (symbol-value 'text-mode-ispell-word-completion)))
                 (saved-props minibuffer-prompt-properties)
                 (saved-kill-transform (and (boundp 'kill-transform-function) kill-transform-function)))
             (minaid--configure-minibuffer)
@@ -429,7 +431,9 @@
             (should (eq read-buffer-completion-ignore-case saved-buf-ignore))
             (should (eq read-file-name-completion-ignore-case saved-file-ignore))
             (should (eq read-extended-command-predicate saved-pred))
-            (should (eq text-mode-ispell-word-completion saved-ispell))
+            (should (eq (boundp 'text-mode-ispell-word-completion) saved-ispell-bound))
+            (when saved-ispell-bound
+              (should (eq (symbol-value 'text-mode-ispell-word-completion) saved-ispell)))
             (should (equal minibuffer-prompt-properties saved-props))
             (should (eq (and (boundp 'kill-transform-function) kill-transform-function)
                         saved-kill-transform))))
@@ -437,6 +441,30 @@
           (minaid-mode 1)
         (when minaid-mode
           (minaid-mode -1))))))
+
+(ert-deftest minaid-test/ispell-setting-boundness-lifecycle ()
+  "Restore the Ispell setting whether it was initially bound or unbound."
+  (let* ((symbol 'text-mode-ispell-word-completion)
+         (originally-bound (boundp symbol))
+         (original-value (and originally-bound (symbol-value symbol)))
+         (minaid-text-mode-ispell-word-completion nil)
+         (minaid--saved-minibuffer-settings nil))
+    (unwind-protect
+        (dolist (initially-bound '(nil t))
+          (if initially-bound
+              (set symbol 'original-value)
+            (makunbound symbol))
+          (minaid--configure-minibuffer)
+          (should (boundp symbol))
+          (should-not (symbol-value symbol))
+          (minaid--restore-minibuffer)
+          (should (eq (boundp symbol) initially-bound))
+          (when initially-bound
+            (should (eq (symbol-value symbol) 'original-value))))
+      (minaid--restore-minibuffer)
+      (if originally-bound
+          (set symbol original-value)
+        (makunbound symbol)))))
 
 (provide 'test-minaid)
 ;;; test-minaid.el ends here
