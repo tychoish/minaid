@@ -68,7 +68,9 @@
   (should (fboundp 'corfu-quick-jump))
   (should (fboundp 'corfu-quick-complete))
   (should (fboundp 'corfu-quick-insert))
-  (let ((was-on minaid-mode))
+  (let ((marginalia-mode-hook (remq #'nerd-icons-completion-marginalia-setup
+                                     (copy-sequence marginalia-mode-hook)))
+        (was-on minaid-mode))
     (unwind-protect
         (progn
           (unless was-on (minaid-mode 1))
@@ -81,9 +83,107 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Mode Lifecycle Tests
 
+(ert-deftest minaid-test/marginalia-does-not-control-completion-icons ()
+  "Enabling minaid must not install a hook that toggles completion icons."
+  (let ((marginalia-mode-hook nil)
+        (was-on minaid-mode))
+    (unwind-protect
+        (progn
+          (when was-on (minaid-mode -1))
+          (minaid-mode 1)
+          (should-not (memq #'nerd-icons-completion-marginalia-setup
+                            marginalia-mode-hook)))
+      (if was-on
+          (progn (minaid-mode -1) (minaid-mode 1))
+        (minaid-mode -1)))))
+
+(ert-deftest minaid-test/completion-icons-handle-buffer-lifetime ()
+  "Buffer icon lookup handles both live and killed candidates."
+  (skip-unless (locate-library "nerd-icons-completion"))
+  (require 'nerd-icons-completion)
+  (let ((buffer (generate-new-buffer " *minaid-icon-test*")))
+    (unwind-protect
+        (let ((name (buffer-name buffer)))
+          (cl-letf (((symbol-function 'nerd-icons-icon-for-buffer)
+                     (lambda (&rest _) "live-icon")))
+            (should (string-match-p "live-icon"
+                                    (nerd-icons-completion-get-icon name 'buffer)))
+            (kill-buffer buffer)
+            (should (equal "" (nerd-icons-completion-get-icon name 'buffer)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(defvar nerd-icons-completion-mode)
+(defvar nerd-icons-xref-mode)
+
+(ert-deftest minaid-test/anzu-search-state-is-buffer-local ()
+  "Minaid isolates Anzu's cached search state between buffers."
+  (let (localized)
+    (cl-letf (((symbol-function 'make-variable-buffer-local)
+               (lambda (symbol) (push symbol localized))))
+      (minaid--configure-anzu-state))
+    (should (memq 'anzu--cached-positions localized))
+    (should (memq 'anzu--total-matched localized))
+    (should (memq 'anzu--last-isearch-string localized))))
+
+(ert-deftest minaid-test/isearch-enables-anzu ()
+  "Repeated searches explicitly enable Anzu instead of toggling it."
+  (let (calls)
+    (cl-letf (((symbol-function 'anzu-mode)
+               (lambda (arg) (push arg calls))))
+      (minaid--isearch-enable-anzu)
+      (minaid--isearch-enable-anzu)
+      (should (equal calls '(1 1))))))
+
+(ert-deftest minaid-test/xref-icons-follow-completion-mode ()
+  "Synchronize xref icons to completion icons in both directions."
+  (let ((nerd-icons-completion-mode t)
+        (minaid--xref-icons-prior nil)
+        (minaid--xref-icons-last nil)
+        calls)
+    (cl-letf (((symbol-function 'nerd-icons-xref-mode)
+               (lambda (arg) (push arg calls))))
+      (minaid--sync-nerd-icons-xref)
+      (setq nerd-icons-completion-mode nil)
+      (minaid--sync-nerd-icons-xref)
+      (should (equal calls '(-1 1))))))
+
+(ert-deftest minaid-test/xref-icons-restore-prior-state ()
+  "Restore the initial xref icon state after synchronization."
+  (let ((nerd-icons-completion-mode t)
+        (nerd-icons-xref-mode nil)
+        (minaid--xref-icons-prior nil)
+        (minaid--xref-icons-last nil))
+    (cl-letf (((symbol-function 'nerd-icons-xref-mode)
+               (lambda (arg) (setq nerd-icons-xref-mode (> arg 0)))))
+      (minaid--sync-nerd-icons-xref)
+      (should nerd-icons-xref-mode)
+      (minaid--restore-nerd-icons-xref)
+      (should-not nerd-icons-xref-mode)
+      (setq nerd-icons-xref-mode t)
+      (setq nerd-icons-completion-mode nil)
+      (minaid--sync-nerd-icons-xref)
+      (should-not nerd-icons-xref-mode)
+      (minaid--restore-nerd-icons-xref)
+      (should nerd-icons-xref-mode))))
+
+(ert-deftest minaid-test/xref-icons-keep-independent-change ()
+  "Do not overwrite an independently changed xref icon mode."
+  (let ((nerd-icons-completion-mode t)
+        (nerd-icons-xref-mode nil)
+        (minaid--xref-icons-prior nil)
+        (minaid--xref-icons-last nil))
+    (cl-letf (((symbol-function 'nerd-icons-xref-mode)
+               (lambda (arg) (setq nerd-icons-xref-mode (> arg 0)))))
+      (minaid--sync-nerd-icons-xref)
+      (setq nerd-icons-xref-mode nil)
+      (minaid--restore-nerd-icons-xref)
+      (should-not nerd-icons-xref-mode))))
+
 (ert-deftest minaid-test/lifecycle-toggle ()
   "Test that enabling and disabling minaid-mode toggles settings symmetrically."
-  (let ((was-on minaid-mode))
+  (let ((marginalia-mode-hook (remq #'nerd-icons-completion-marginalia-setup
+                                     (copy-sequence marginalia-mode-hook)))
+        (was-on minaid-mode))
     (unwind-protect
         (progn
           (when was-on
@@ -107,6 +207,8 @@
             (should (memq #'minaid-corfu-prog-mode-setup comint-mode-hook))
             (should (memq #'minaid-corfu-agent-shell-setup agent-shell-mode-hook))
             (should (memq #'minaid-load-abbrev-files abbrev-mode-hook))
+            (should (memq #'minaid--isearch-enable-anzu (default-value 'isearch-mode-hook)))
+            (should (memq #'minaid--sync-nerd-icons-xref nerd-icons-completion-mode-hook))
             (should (eq (lookup-key minaid-mode-map (kbd "C-.")) #'embark-act))
 
             ;; Disable mode
@@ -122,6 +224,8 @@
             (should-not (memq #'minaid-corfu-prog-mode-setup comint-mode-hook))
             (should-not (memq #'minaid-corfu-agent-shell-setup agent-shell-mode-hook))
             (should-not (memq #'minaid-load-abbrev-files abbrev-mode-hook))
+            (should-not (memq #'minaid--isearch-enable-anzu (default-value 'isearch-mode-hook)))
+            (should-not (memq #'minaid--sync-nerd-icons-xref nerd-icons-completion-mode-hook))
             (should-not (memq #'corfu-history-mode corfu-mode-hook))
             (should-not (memq #'corfu-indexed-mode corfu-mode-hook))
             (should-not (memq #'corfu-popupinfo-mode corfu-mode-hook))))
@@ -141,7 +245,9 @@
 
 (ert-deftest minaid-test/enable-sets-tempel-path ()
   "Enabling `minaid-mode' points `tempel-path' at `minaid-tempel-directory'."
-  (let ((was-on minaid-mode))
+  (let ((marginalia-mode-hook (remq #'nerd-icons-completion-marginalia-setup
+                                     (copy-sequence marginalia-mode-hook)))
+        (was-on minaid-mode))
     (unwind-protect
         (let ((minaid-tempel-directory "/tmp/minaid-templates"))
           (minaid-mode -1)
@@ -336,6 +442,8 @@
 (ert-deftest minaid-test/corfu-enabled-in-all-buffers ()
   "Test that minaid-mode enables corfu in text, prog, fundamental, comint buffers."
   (let ((noninteractive nil)
+        (marginalia-mode-hook (remq #'nerd-icons-completion-marginalia-setup
+                                     (copy-sequence marginalia-mode-hook)))
         (was-on minaid-mode))
     (unwind-protect
         (progn
@@ -460,7 +568,9 @@
 
 (ert-deftest minaid-test/minibuffer-and-completion-settings-lifecycle ()
   "Settings managed by `minaid-mode' are applied on enable and restored on teardown."
-  (let ((was-on minaid-mode))
+  (let ((marginalia-mode-hook (remq #'nerd-icons-completion-marginalia-setup
+                                     (copy-sequence marginalia-mode-hook)))
+        (was-on minaid-mode))
     (unwind-protect
         (progn
           (when was-on

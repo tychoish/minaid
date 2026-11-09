@@ -60,7 +60,11 @@
 (declare-function consult-flyspell "consult-flyspell")
 (declare-function consult-flycheck "consult-flycheck")
 (declare-function nerd-icons-corfu-formatter "nerd-icons-corfu")
-(declare-function nerd-icons-completion-marginalia-setup "nerd-icons-completion")
+(declare-function anzu-mode "anzu")
+(declare-function nerd-icons-xref-mode "nerd-icons-xref")
+(defvar nerd-icons-completion-mode)
+(defvar nerd-icons-completion-mode-hook)
+(defvar nerd-icons-xref-mode)
 (declare-function eglot-completion-at-point "eglot")
 (declare-function which-key-show-keymap "which-key")
 (declare-function which-key--popup-showing-p "which-key")
@@ -95,6 +99,12 @@
 (defvar corfu-auto-prefix)
 (defvar corfu-auto-delay)
 (defvar eglot--managed-mode)
+
+(cl-defmethod nerd-icons-completion-get-icon :around (candidate (_category (eql buffer)))
+  "Skip icon lookup when CANDIDATE names a killed buffer."
+  (if (buffer-live-p (get-buffer candidate))
+      (cl-call-next-method)
+    ""))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Customization
@@ -739,6 +749,47 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
           minaid--saved-minibuffer-bindings)
   (setq minaid--saved-minibuffer-bindings nil))
 
+(defvar minaid--xref-icons-prior nil
+  "Previous xref icon mode state, wrapped in a list when managed.")
+
+(defvar minaid--xref-icons-last nil
+  "Last xref icon mode state applied by Minaid.")
+
+(defun minaid--configure-anzu-state ()
+  "Keep Anzu's search caches separate between buffers."
+  (seq-do #'make-variable-buffer-local
+          '(anzu--total-matched anzu--current-position anzu--state
+            anzu--cached-count anzu--cached-positions anzu--last-command
+            anzu--last-isearch-string anzu--last-search-state anzu--overflow-p)))
+
+(when (bound-and-true-p minaid-mode)
+  (minaid--configure-anzu-state))
+
+(defun minaid--isearch-enable-anzu ()
+  "Enable Anzu for the current search when it is available."
+  (if (fboundp 'anzu-mode)
+      (anzu-mode 1)
+    (message "Minaid: Anzu is not installed; search match counts are unavailable")))
+
+(defun minaid--sync-nerd-icons-xref ()
+  "Synchronize xref icons with `nerd-icons-completion-mode'."
+  (when (and (boundp 'nerd-icons-completion-mode)
+             (fboundp 'nerd-icons-xref-mode))
+    (unless minaid--xref-icons-prior
+      (setq minaid--xref-icons-prior (list (bound-and-true-p nerd-icons-xref-mode))))
+    (setq minaid--xref-icons-last (and nerd-icons-completion-mode t))
+    (nerd-icons-xref-mode (if minaid--xref-icons-last 1 -1))))
+
+(defun minaid--restore-nerd-icons-xref ()
+  "Restore xref icon state unless it was independently changed."
+  (when (and minaid--xref-icons-prior
+             (fboundp 'nerd-icons-xref-mode)
+             (eq (and (bound-and-true-p nerd-icons-xref-mode) t)
+                 minaid--xref-icons-last))
+    (nerd-icons-xref-mode (if (car minaid--xref-icons-prior) 1 -1)))
+  (setq minaid--xref-icons-prior nil)
+  (setq minaid--xref-icons-last nil))
+
 (defun minaid--enable ()
   "Perform enablement of all minad completion components."
   (minaid--install-minibuffer-bindings)
@@ -755,6 +806,12 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
   (vertico-multiform-mode 1)
   (marginalia-mode 1)
   (global-corfu-mode 1)
+
+  ;; Search and xref integrations
+  (minaid--configure-anzu-state)
+  (add-hook 'isearch-mode-hook #'minaid--isearch-enable-anzu)
+  (add-hook 'nerd-icons-completion-mode-hook #'minaid--sync-nerd-icons-xref)
+  (minaid--sync-nerd-icons-xref)
 
   ;; Capf major mode hooks
   (advice-add 'tempel--insert :after #'minaid--tempel-legend-start)
@@ -781,10 +838,8 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
   (when (file-directory-p minaid-abbrev-directory)
     (minaid-load-abbrev-files))
 
-  ;; Marginalia command category overrides & nerd icons
-  (add-to-list 'marginalia-command-categories '(consult-completion-in-region . imenu))
-  (when (fboundp 'nerd-icons-completion-marginalia-setup)
-    (add-hook 'marginalia-mode-hook #'nerd-icons-completion-marginalia-setup)))
+  ;; Marginalia command category overrides
+  (add-to-list 'marginalia-command-categories '(consult-completion-in-region . imenu)))
 
 (defun minaid--disable ()
   "Tear down all minad completion components and restore original state."
@@ -792,6 +847,10 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
   (minaid--restore-minibuffer)
   (minaid--restore-dabbrev)
   (remove-hook 'abbrev-mode-hook #'minaid-load-abbrev-files)
+
+  (remove-hook 'isearch-mode-hook #'minaid--isearch-enable-anzu)
+  (remove-hook 'nerd-icons-completion-mode-hook #'minaid--sync-nerd-icons-xref)
+  (minaid--restore-nerd-icons-xref)
 
   ;; Remove Consult advice
   (advice-remove 'register-preview 'consult-register-window)
@@ -826,9 +885,7 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
   (remove-hook 'text-mode-hook #'minaid-text-mode-capf-setup)
   (remove-hook 'prog-mode-hook #'minaid-prog-mode-capf-setup)
 
-  ;; Symmetrically remove Marginalia and Corfu sub-mode hooks
-  (when (fboundp 'nerd-icons-completion-marginalia-setup)
-    (remove-hook 'marginalia-mode-hook #'nerd-icons-completion-marginalia-setup))
+  ;; Remove Corfu sub-mode hooks
   (remove-hook 'corfu-mode-hook #'corfu-history-mode)
   (remove-hook 'corfu-mode-hook #'corfu-indexed-mode)
   (remove-hook 'corfu-mode-hook #'corfu-popupinfo-mode)
