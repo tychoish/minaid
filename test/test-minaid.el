@@ -10,6 +10,8 @@
 (require 'comint)
 (require 'corfu-quick)
 
+(defvar which-key-mode)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Alias and Keymap Tests
 
