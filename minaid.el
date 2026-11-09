@@ -131,6 +131,56 @@ Used for `tempel-path' while `minaid-mode' is enabled and by
   :type 'integer
   :group 'minaid)
 
+(defcustom minaid-enable-recursive-minibuffers t
+  "Whether `minaid-mode' enables recursive minibuffers."
+  :type 'boolean
+  :group 'minaid)
+
+(defcustom minaid-minibuffer-prompt-properties
+  '(read-only t cursor-intangible t face minibuffer-prompt)
+  "Minibuffer prompt properties applied while `minaid-mode' is active."
+  :type 'list
+  :group 'minaid)
+
+(defcustom minaid-text-mode-ispell-word-completion nil
+  "Value of `text-mode-ispell-word-completion' applied in `minaid-mode'."
+  :type 'boolean
+  :group 'minaid)
+
+(defcustom minaid-completion-cycle-threshold 2
+  "Number of candidates below which TAB cycles completion."
+  :type '(choice (const :tag "Never cycle" nil)
+                 (const :tag "Always cycle" t)
+                 (integer :tag "Cycle if candidates <= N"))
+  :group 'minaid)
+
+(defcustom minaid-completion-ignore-case t
+  "Whether minibuffer completion ignores case in `minaid-mode'."
+  :type 'boolean
+  :group 'minaid)
+
+(defcustom minaid-read-buffer-completion-ignore-case t
+  "Whether `read-buffer' completion ignores case in `minaid-mode'."
+  :type 'boolean
+  :group 'minaid)
+
+(defcustom minaid-read-file-name-completion-ignore-case t
+  "Whether `read-file-name' completion ignores case in `minaid-mode'."
+  :type 'boolean
+  :group 'minaid)
+
+(defcustom minaid-read-extended-command-predicate
+  #'command-completion-default-include-p
+  "Predicate to filter commands in `execute-extended-command'."
+  :type '(choice (const :tag "All commands" nil)
+                 (function :tag "Predicate function"))
+  :group 'minaid)
+
+(defcustom minaid-reject-empty-kill-ring t
+  "Whether `minaid-mode' filters empty strings out of `kill-ring' via `kill-transform-function'."
+  :type 'boolean
+  :group 'minaid)
+
 (defvaralias 'minaid-map 'minaid-completion-map
   "Alias for `minaid-completion-map', container for completion-at-point shortcuts.")
 
@@ -519,6 +569,56 @@ Prefers Projectile root, falling back to `project.el' and `default-directory'."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Mode Lifecycle (Enablement / Teardown)
 
+(defvar minaid--saved-minibuffer-settings nil
+  "Alist of (SYMBOL . (BOUNDP . VALUE)) saved before enabling `minaid-mode'.")
+
+(defun minaid--kill-transform-reject-empty (string)
+  "Transform STRING for `kill-transform-function', rejecting empty strings.
+Returns STRING when non-empty, or nil to discard it from the kill ring."
+  (unless (string-empty-p string)
+    string))
+
+(defun minaid--configure-minibuffer ()
+  "Configure standard Emacs minibuffer, completion, and kill-ring settings."
+  (unless minaid--saved-minibuffer-settings
+    (let ((settings `((enable-recursive-minibuffers . ,minaid-enable-recursive-minibuffers)
+                      (minibuffer-prompt-properties . ,minaid-minibuffer-prompt-properties)
+                      (text-mode-ispell-word-completion . ,minaid-text-mode-ispell-word-completion)
+                      (completion-cycle-threshold . ,minaid-completion-cycle-threshold)
+                      (completion-ignore-case . ,minaid-completion-ignore-case)
+                      (read-buffer-completion-ignore-case . ,minaid-read-buffer-completion-ignore-case)
+                      (read-file-name-completion-ignore-case . ,minaid-read-file-name-completion-ignore-case)
+                      (read-extended-command-predicate . ,minaid-read-extended-command-predicate))))
+      (dolist (pair settings)
+        (let ((sym (car pair))
+              (val (cdr pair)))
+          (push (cons sym (if (boundp sym) (cons t (symbol-value sym)) (cons nil nil)))
+                minaid--saved-minibuffer-settings)
+          (set sym val))))
+    (when minaid-reject-empty-kill-ring
+      (push (cons 'kill-transform-function
+                  (if (boundp 'kill-transform-function)
+                      (cons t kill-transform-function)
+                    (cons nil nil)))
+            minaid--saved-minibuffer-settings)
+      (let ((orig (and (boundp 'kill-transform-function) kill-transform-function)))
+        (setq kill-transform-function
+              (if orig
+                  (lambda (str)
+                    (when-let* ((s (funcall orig str)))
+                      (minaid--kill-transform-reject-empty s)))
+                #'minaid--kill-transform-reject-empty))))))
+
+(defun minaid--restore-minibuffer ()
+  "Restore standard Emacs minibuffer, completion, and kill-ring settings."
+  (dolist (entry minaid--saved-minibuffer-settings)
+    (let ((sym (car entry))
+          (status (cdr entry)))
+      (if (car status)
+          (set sym (cdr status))
+        (makunbound sym))))
+  (setq minaid--saved-minibuffer-settings nil))
+
 (defun minaid--install-minibuffer-bindings ()
   "Bind `minaid-minibuffer-bindings', saving prior definitions once."
   (unless minaid--saved-minibuffer-bindings
@@ -543,6 +643,7 @@ Prefers Projectile root, falling back to `project.el' and `default-directory'."
 (defun minaid--enable ()
   "Perform enablement of all minad completion components."
   (minaid--install-minibuffer-bindings)
+  (minaid--configure-minibuffer)
   (minaid--configure-vertico)
   (minaid--configure-orderless)
   (minaid--configure-corfu)
@@ -582,6 +683,7 @@ Prefers Projectile root, falling back to `project.el' and `default-directory'."
 (defun minaid--disable ()
   "Tear down all minad completion components and restore original state."
   (minaid--restore-minibuffer-bindings)
+  (minaid--restore-minibuffer)
 
   ;; Remove Consult advice
   (advice-remove 'register-preview 'consult-register-window)
