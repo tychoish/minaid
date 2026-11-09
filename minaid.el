@@ -29,6 +29,7 @@
 
 (require 'cl-lib)
 (require 'seq)
+(require 'map)
 (require 'subr-x)
 (require 'vertico)
 (require 'vertico-multiform)
@@ -180,6 +181,24 @@ Used for `tempel-path' while `minaid-mode' is enabled and by
   "Whether `minaid-mode' filters empty strings out of `kill-ring'.
 Uses `kill-transform-function' to reject empty additions."
   :type 'boolean
+  :group 'minaid)
+
+(defcustom minaid-dabbrev-ignored-buffer-regexps '("\\` ")
+  "List of regexps matching names of buffers that Dabbrev should ignore."
+  :type '(repeat regexp)
+  :group 'minaid)
+
+(defcustom minaid-dabbrev-ignored-buffer-modes
+  '(authinfo-mode doc-view-mode pdf-view-mode tags-table-mode)
+  "List of major modes that Dabbrev should ignore."
+  :type '(repeat symbol)
+  :group 'minaid)
+
+;;;###autoload
+(defcustom minaid-abbrev-directory
+  (expand-file-name "abbrev" user-emacs-directory)
+  "Directory of abbrev definition files loaded by `minaid-load-abbrev-files'."
+  :type 'directory
   :group 'minaid)
 
 (defvaralias 'minaid-map 'minaid-completion-map
@@ -573,6 +592,60 @@ Prefers Projectile root, falling back to `project.el' and `default-directory'."
 (defvar minaid--saved-minibuffer-settings nil
   "Alist of (SYMBOL . (BOUNDP . VALUE)) saved before enabling `minaid-mode'.")
 
+(defvar dabbrev-ignored-buffer-regexps)
+(defvar dabbrev-ignored-buffer-modes)
+
+(defvar minaid--saved-dabbrev-settings nil
+  "Saved dabbrev ignore lists before enabling `minaid-mode'.")
+
+(defun minaid--configure-dabbrev ()
+  "Configure Dabbrev buffer and mode ignore filters."
+  (require 'dabbrev)
+  (unless minaid--saved-dabbrev-settings
+    (setq minaid--saved-dabbrev-settings
+          (list (copy-sequence dabbrev-ignored-buffer-regexps)
+                (copy-sequence dabbrev-ignored-buffer-modes)))
+    (dolist (re minaid-dabbrev-ignored-buffer-regexps)
+      (add-to-list 'dabbrev-ignored-buffer-regexps re))
+    (dolist (mode minaid-dabbrev-ignored-buffer-modes)
+      (add-to-list 'dabbrev-ignored-buffer-modes mode))))
+
+(defun minaid--restore-dabbrev ()
+  "Restore Dabbrev buffer and mode ignore filters."
+  (when minaid--saved-dabbrev-settings
+    (setq dabbrev-ignored-buffer-regexps (nth 0 minaid--saved-dabbrev-settings)
+          dabbrev-ignored-buffer-modes (nth 1 minaid--saved-dabbrev-settings))
+    (setq minaid--saved-dabbrev-settings nil)))
+
+(defvar minaid-abbrev-files-cache (make-hash-table :test #'equal)
+  "Cache mapping file paths to modification times to avoid redundant loading.")
+
+(defun minaid-should-read-abbrev-file-p (path)
+  "Return non-nil if abbrev file at PATH needs to be (re-)loaded."
+  (when-let* ((attrs (file-attributes path))
+              (mtime (file-attribute-modification-time attrs)))
+    (or (not (map-contains-key minaid-abbrev-files-cache path))
+        (time-less-p (map-elt minaid-abbrev-files-cache path) mtime))))
+
+;;;###autoload
+(defun minaid-load-abbrev-files (&optional directory)
+  "Load all abbrev definitions from DIRECTORY (`minaid-abbrev-directory').
+Only loads files whose modification time is newer than cache."
+  (interactive)
+  (let ((dir (or directory minaid-abbrev-directory)))
+    (when (and dir (file-directory-p dir))
+      (thread-last
+        (directory-files dir t "\\.el\\(?:\\.gz\\)?\\'" :nosort)
+        (seq-filter #'minaid-should-read-abbrev-file-p)
+        (seq-map (lambda (path)
+                   (let ((quietly t))
+                     (read-abbrev-file path quietly)
+                     path)))
+        (mapc (lambda (it)
+                (when-let* ((attrs (file-attributes it)))
+                  (setf (map-elt minaid-abbrev-files-cache it)
+                        (file-attribute-modification-time attrs)))))))))
+
 (defun minaid--kill-transform-reject-empty (string)
   "Transform STRING for `kill-transform-function', rejecting empty strings.
 Returns STRING when non-empty, or nil to discard it from the kill ring."
@@ -645,6 +718,7 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
   "Perform enablement of all minad completion components."
   (minaid--install-minibuffer-bindings)
   (minaid--configure-minibuffer)
+  (minaid--configure-dabbrev)
   (minaid--configure-vertico)
   (minaid--configure-orderless)
   (minaid--configure-corfu)
@@ -676,6 +750,11 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
 
   (setq tempel-path minaid-tempel-directory)
 
+  ;; Abbrev definitions loader
+  (add-hook 'abbrev-mode-hook #'minaid-load-abbrev-files)
+  (when (file-directory-p minaid-abbrev-directory)
+    (minaid-load-abbrev-files))
+
   ;; Marginalia command category overrides & nerd icons
   (add-to-list 'marginalia-command-categories '(consult-completion-in-region . imenu))
   (when (fboundp 'nerd-icons-completion-marginalia-setup)
@@ -685,6 +764,8 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
   "Tear down all minad completion components and restore original state."
   (minaid--restore-minibuffer-bindings)
   (minaid--restore-minibuffer)
+  (minaid--restore-dabbrev)
+  (remove-hook 'abbrev-mode-hook #'minaid-load-abbrev-files)
 
   ;; Remove Consult advice
   (advice-remove 'register-preview 'consult-register-window)
