@@ -62,6 +62,8 @@
 (declare-function nerd-icons-corfu-formatter "nerd-icons-corfu")
 (declare-function nerd-icons-completion-marginalia-setup "nerd-icons-completion")
 (declare-function eglot-completion-at-point "eglot")
+(declare-function which-key-show-keymap "which-key")
+(declare-function which-key--popup-showing-p "which-key")
 (declare-function corfu-history-mode "corfu-history")
 (declare-function corfu-indexed-mode "corfu-indexed")
 (declare-function corfu-popupinfo-mode "corfu-popupinfo")
@@ -213,8 +215,12 @@ Uses `kill-transform-function' to reject empty additions."
 (keymap-set minaid-completion-map "/" #'dabbrev-expand)
 (keymap-set minaid-completion-map "c" #'dabbrev-completion)
 (keymap-set minaid-completion-map "i" #'tempel-insert)
+(keymap-set minaid-completion-map "t" #'tempel-insert)
 (keymap-set minaid-completion-map "s" #'tempel-complete)
 (keymap-set minaid-completion-map "x" #'tempel-expand)
+(keymap-set minaid-completion-map "]" #'tempel-next)
+(keymap-set minaid-completion-map "[" #'tempel-previous)
+(keymap-set minaid-completion-map "RET" #'tempel-done)
 (keymap-set minaid-completion-map "v" #'minaid-open-custom-template-file)
 (keymap-set minaid-completion-map "d" #'cape-dabbrev)
 (keymap-set minaid-completion-map "h" #'cape-history)
@@ -391,14 +397,33 @@ Non-nil only while `minaid-mode' owns the minibuffer bindings.")
                 (seq-filter #'identity)
                 (seq-uniq))))
 
+(defun minaid--tempel-legend-update ()
+  "Display Tempel field bindings until the active template ends."
+  (if (and (bound-and-true-p minaid-mode)
+           (bound-and-true-p tempel--active)
+           (bound-and-true-p which-key-mode)
+           (fboundp 'which-key-show-keymap))
+      (unless (and (fboundp 'which-key--popup-showing-p)
+                   (which-key--popup-showing-p))
+        (which-key-show-keymap 'tempel-map t))
+    (remove-hook 'post-command-hook #'minaid--tempel-legend-update t)))
+
+(defun minaid--tempel-legend-start (&rest _args)
+  "Start showing the Tempel field legend after template insertion."
+  (when (and (bound-and-true-p minaid-mode)
+             (bound-and-true-p tempel--active)
+             (bound-and-true-p which-key-mode)
+             (fboundp 'which-key-show-keymap))
+    (add-hook 'post-command-hook #'minaid--tempel-legend-update nil t)
+    (minaid--tempel-legend-update)))
+
 (defun minaid-eglot-capf-setup ()
   "Configure Capf for Eglot-managed buffers."
   (setq-local completion-category-defaults nil)
   (setq-local completion-at-point-functions
               (thread-last
-                (list (if (fboundp 'cape-wrap-buster)
-                          (apply-partially #'cape-wrap-buster #'eglot-completion-at-point)
-                        #'eglot-completion-at-point)
+                (list (cape-capf-super #'tempel-complete
+                                       (cape-capf-buster #'eglot-completion-at-point))
                       (minaid--word-capfs)
                       #'tempel-complete
                       #'cape-dabbrev
@@ -732,6 +757,7 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
   (global-corfu-mode 1)
 
   ;; Capf major mode hooks
+  (advice-add 'tempel--insert :after #'minaid--tempel-legend-start)
   (add-hook 'eglot-managed-mode-hook #'minaid-eglot-capf-setup)
   (add-hook 'emacs-lisp-mode-hook #'minaid-elisp-capf-setup)
   (add-hook 'telega-chat-mode-hook #'minaid-text-mode-capf-setup)
@@ -793,6 +819,7 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
     (setq minaid--saved-xref-show-definitions-function nil))
 
   ;; Remove Capf hooks
+  (advice-remove 'tempel--insert #'minaid--tempel-legend-start)
   (remove-hook 'eglot-managed-mode-hook #'minaid-eglot-capf-setup)
   (remove-hook 'emacs-lisp-mode-hook #'minaid-elisp-capf-setup)
   (remove-hook 'telega-chat-mode-hook #'minaid-text-mode-capf-setup)

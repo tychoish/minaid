@@ -28,6 +28,10 @@
   (should (eq (keymap-lookup minaid-completion-map "/") #'dabbrev-expand))
   (should (eq (keymap-lookup minaid-completion-map "c") #'dabbrev-completion))
   (should (eq (keymap-lookup minaid-completion-map "i") #'tempel-insert))
+  (should (eq (keymap-lookup minaid-completion-map "t") #'tempel-insert))
+  (should (eq (keymap-lookup minaid-completion-map "]") #'tempel-next))
+  (should (eq (keymap-lookup minaid-completion-map "[") #'tempel-previous))
+  (should (eq (keymap-lookup minaid-completion-map "RET") #'tempel-done))
   (should (eq (keymap-lookup minaid-completion-map "d") #'cape-dabbrev))
   (should (eq (keymap-lookup minaid-completion-map "h") #'cape-history))
   (should (eq (keymap-lookup minaid-completion-map "f") #'cape-file))
@@ -229,7 +233,7 @@
     (minaid-setup-capfs)
     ;; Should have configured eglot capf, not plain prog-mode capf
     (should (assq 'completion-category-defaults (buffer-local-variables)))
-    (should (memq #'tempel-complete completion-at-point-functions))
+    (should (functionp (car completion-at-point-functions)))
     (should (memq #'cape-dabbrev completion-at-point-functions))))
 
 (ert-deftest minaid-test/eglot-capf-setup-cape-wrap-buster ()
@@ -240,6 +244,66 @@
     ;; The first function is either eglot-completion-at-point or a cape-wrap-buster closure
     (let ((first-capf (car completion-at-point-functions)))
       (should (functionp first-capf)))))
+
+(ert-deftest minaid-test/tempel-key-legend-lifecycle ()
+  "Show the field map while a template is active and stop after it ends."
+  (with-temp-buffer
+    (let ((minaid-mode t)
+          (which-key-mode t)
+          (shown 0)
+          (had-advice (advice-member-p #'minaid--tempel-legend-start 'tempel--insert)))
+      (unwind-protect
+          (progn
+            (advice-add 'tempel--insert :after #'minaid--tempel-legend-start)
+      (cl-letf (((symbol-function 'which-key--popup-showing-p) (lambda () nil))
+                ((symbol-function 'which-key-show-keymap)
+                 (lambda (map no-paging)
+                   (should (eq map 'tempel-map))
+                   (should no-paging)
+                   (setq shown (1+ shown)))))
+        (minaid--tempel-legend-start '(p "first" n (p "second")) nil)
+        (should (= shown 0))
+        (tempel--insert '((p "first") " " (p "second")) nil)
+        (should (= shown 1))
+        (should (memq #'minaid--tempel-legend-update post-command-hook))
+        (minaid--tempel-legend-update)
+        (should (= shown 2))
+        (tempel-done)
+        (minaid--tempel-legend-update)
+        (should-not (memq #'minaid--tempel-legend-update post-command-hook))))
+        (unless had-advice
+          (advice-remove 'tempel--insert #'minaid--tempel-legend-start))))))
+
+(ert-deftest minaid-test/eglot-prefers-tempel-bounds ()
+  "Use Tempel's start when it differs from Eglot's start."
+  (with-temp-buffer
+    (insert "x.fo")
+    (cl-letf (((symbol-function 'eglot-completion-at-point)
+               (lambda () (list 3 (point) '("fooLsp"))))
+              ((symbol-function 'tempel--templates)
+               (lambda () '((x.fooTemplate "expanded")))))
+      (minaid-eglot-capf-setup)
+      (let ((capf (funcall (car completion-at-point-functions))))
+        (should (= (car capf) 1))
+        (should (member "x.fooTemplate" (all-completions "x.fo" (nth 2 capf))))))))
+
+(ert-deftest minaid-test/eglot-offers-and-expands-tempel-candidates ()
+  "Combine exclusive Eglot candidates with expandable Tempel templates."
+  (with-temp-buffer
+    (insert "fo")
+    (cl-letf (((symbol-function 'eglot-completion-at-point)
+               (lambda () (list 1 (point) '("fooLsp"))))
+              ((symbol-function 'tempel--templates)
+               (lambda () '((fooTemplate "expanded")))))
+      (minaid-eglot-capf-setup)
+      (let* ((capf (funcall (car completion-at-point-functions)))
+             (candidates (all-completions "fo" (nth 2 capf))))
+        (should (member "fooLsp" candidates))
+        (should (member "fooTemplate" candidates))
+        (delete-region 1 (point))
+        (insert "fooTemplate")
+        (funcall (plist-get (nthcdr 3 capf) :exit-function) "fooTemplate" 'finished)
+        (should (equal (buffer-string) "expanded"))))))
 
 (ert-deftest minaid-test/setup-capfs-non-file-buffer-error ()
   "Test that setup-capfs signals user-error when buffer is not visiting a file."

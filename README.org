@@ -112,6 +112,16 @@ A complete ~use-package~ configuration block showing keymap bindings and custom 
 - =minaid-consult-search-map=: Line search and filtering submap mounted at =s=.
 - =minaid-global-map=: Global bindings for Consult buffer switcher, find-at-point, and Embark actions.
 
+** Templates and fields
+Eglot completion includes matching Tempel templates alongside language server
+candidates when both sources use the same completion bounds.  Cape cannot merge
+sources with different starting positions; Tempel takes precedence in that case.
+Use =C-c . t= to select a template.  Which-key displays the field bindings
+while a template is active.  After inserting a template, use =M-}= or =M-<down>= for the next
+field, =M-{= or =M-<up>= for the previous field, and =M-RET= to finish.  The
+completion prefix also offers =]=, =[=, and =RET= for these commands, so they
+are discoverable through prefix-key help.
+
 * License
 :PROPERTIES:
 :CUSTOM_ID: license
