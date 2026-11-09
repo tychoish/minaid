@@ -139,7 +139,7 @@ Used for `tempel-path' while `minaid-mode' is enabled and by
 (defcustom minaid-minibuffer-prompt-properties
   '(read-only t cursor-intangible t face minibuffer-prompt)
   "Minibuffer prompt properties applied while `minaid-mode' is active."
-  :type 'list
+  :type '(repeat sexp)
   :group 'minaid)
 
 (defcustom minaid-text-mode-ispell-word-completion nil
@@ -177,7 +177,8 @@ Used for `tempel-path' while `minaid-mode' is enabled and by
   :group 'minaid)
 
 (defcustom minaid-reject-empty-kill-ring t
-  "Whether `minaid-mode' filters empty strings out of `kill-ring' via `kill-transform-function'."
+  "Whether `minaid-mode' filters empty strings out of `kill-ring'.
+Uses `kill-transform-function' to reject empty additions."
   :type 'boolean
   :group 'minaid)
 
