@@ -625,7 +625,7 @@ Prefers Projectile root, falling back to `project.el' and `default-directory'."
 ;;; Mode Lifecycle (Enablement / Teardown)
 
 (defvar minaid--saved-minibuffer-settings nil
-  "Alist of (SYMBOL . (BOUNDP . VALUE)) saved before enabling `minaid-mode'.")
+  "Prior boundness, value and installed kill transform, when managed.")
 
 (defvar dabbrev-ignored-buffer-regexps)
 (defvar dabbrev-ignored-buffer-modes)
@@ -648,8 +648,8 @@ Prefers Projectile root, falling back to `project.el' and `default-directory'."
 (defun minaid--restore-dabbrev ()
   "Restore Dabbrev buffer and mode ignore filters."
   (when minaid--saved-dabbrev-settings
-    (setq dabbrev-ignored-buffer-regexps (nth 0 minaid--saved-dabbrev-settings)
-          dabbrev-ignored-buffer-modes (nth 1 minaid--saved-dabbrev-settings))
+    (setq dabbrev-ignored-buffer-regexps (nth 0 minaid--saved-dabbrev-settings))
+    (setq dabbrev-ignored-buffer-modes (nth 1 minaid--saved-dabbrev-settings))
     (setq minaid--saved-dabbrev-settings nil)))
 
 (defvar minaid-abbrev-files-cache (make-hash-table :test #'equal)
@@ -687,46 +687,76 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
   (unless (string-empty-p string)
     string))
 
+(defcustom minaid-settings
+  `((use-dialog-box . nil)
+    (use-short-answers . t)
+    (tooltip-resize-echo-area . t)
+    (find-file-visit-truename . t)
+    (enable-recursive-minibuffers . ,minaid-enable-recursive-minibuffers)
+    (minibuffer-prompt-properties . ,minaid-minibuffer-prompt-properties)
+    (text-mode-ispell-word-completion . ,minaid-text-mode-ispell-word-completion)
+    (completion-cycle-threshold . ,minaid-completion-cycle-threshold)
+    (completion-ignore-case . ,minaid-completion-ignore-case)
+    (read-buffer-completion-ignore-case . ,minaid-read-buffer-completion-ignore-case)
+    (read-file-name-completion-ignore-case . ,minaid-read-file-name-completion-ignore-case)
+    (read-extended-command-predicate . ,minaid-read-extended-command-predicate))
+  "Alist of `(SYMBOL . VALUE)' settings managed by `minaid-mode'."
+  :type '(alist :key-type symbol :value-type sexp)
+  :group 'minaid)
+
+(defvar minaid--saved-settings nil
+  "Saved prior settings recorded by `minaid--apply-settings'.")
+
+(defun minaid--apply-settings ()
+  "Apply `minaid-settings' and record prior default values."
+  (unless minaid--saved-settings
+    (seq-do (lambda (entry)
+              (let ((symbol (car entry))
+                    (value (cdr entry)))
+                (push (cons symbol
+                            (cons (default-boundp symbol)
+                                  (and (default-boundp symbol)
+                                       (default-value symbol))))
+                      minaid--saved-settings)
+                (set-default symbol value)))
+            minaid-settings)))
+
+(defun minaid--restore-settings ()
+  "Restore settings saved by `minaid--apply-settings'."
+  (seq-do (lambda (entry)
+            (let ((symbol (car entry))
+                  (bound (cadr entry))
+                  (value (cddr entry)))
+              (if bound
+                  (set-default symbol value)
+                (makunbound symbol))))
+          minaid--saved-settings)
+  (setq minaid--saved-settings nil))
+
 (defun minaid--configure-minibuffer ()
   "Configure standard Emacs minibuffer, completion, and kill-ring settings."
   (unless minaid--saved-minibuffer-settings
-    (let ((settings `((enable-recursive-minibuffers . ,minaid-enable-recursive-minibuffers)
-                      (minibuffer-prompt-properties . ,minaid-minibuffer-prompt-properties)
-                      (text-mode-ispell-word-completion . ,minaid-text-mode-ispell-word-completion)
-                      (completion-cycle-threshold . ,minaid-completion-cycle-threshold)
-                      (completion-ignore-case . ,minaid-completion-ignore-case)
-                      (read-buffer-completion-ignore-case . ,minaid-read-buffer-completion-ignore-case)
-                      (read-file-name-completion-ignore-case . ,minaid-read-file-name-completion-ignore-case)
-                      (read-extended-command-predicate . ,minaid-read-extended-command-predicate))))
-      (dolist (pair settings)
-        (let ((sym (car pair))
-              (val (cdr pair)))
-          (push (cons sym (if (boundp sym) (cons t (symbol-value sym)) (cons nil nil)))
-                minaid--saved-minibuffer-settings)
-          (set sym val))))
+    (setq minaid--saved-settings nil)
+    (minaid--apply-settings)
     (when minaid-reject-empty-kill-ring
-      (push (cons 'kill-transform-function
-                  (if (boundp 'kill-transform-function)
-                      (cons t kill-transform-function)
-                    (cons nil nil)))
-            minaid--saved-minibuffer-settings)
-      (let ((orig (and (boundp 'kill-transform-function) kill-transform-function)))
-        (setq kill-transform-function
-              (if orig
-                  (lambda (str)
-                    (when-let* ((s (funcall orig str)))
-                      (minaid--kill-transform-reject-empty s)))
-                #'minaid--kill-transform-reject-empty))))))
+      (let* ((bound (default-boundp 'kill-transform-function))
+             (original (and bound (default-value 'kill-transform-function))))
+        (setq minaid--saved-minibuffer-settings (cons bound original))
+        (set-default 'kill-transform-function
+                     (if original
+                         (lambda (str)
+                           (when-let* ((value (funcall original str)))
+                             (minaid--kill-transform-reject-empty value)))
+                       #'minaid--kill-transform-reject-empty))))))
 
 (defun minaid--restore-minibuffer ()
   "Restore standard Emacs minibuffer, completion, and kill-ring settings."
-  (dolist (entry minaid--saved-minibuffer-settings)
-    (let ((sym (car entry))
-          (status (cdr entry)))
-      (if (car status)
-          (set sym (cdr status))
-        (makunbound sym))))
-  (setq minaid--saved-minibuffer-settings nil))
+  (when minaid--saved-minibuffer-settings
+    (if (car minaid--saved-minibuffer-settings)
+        (set-default 'kill-transform-function (cdr minaid--saved-minibuffer-settings))
+      (makunbound 'kill-transform-function))
+    (setq minaid--saved-minibuffer-settings nil))
+  (minaid--restore-settings))
 
 (defun minaid--install-minibuffer-bindings ()
   "Bind `minaid-minibuffer-bindings', saving prior definitions once."

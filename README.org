@@ -128,3 +128,12 @@ are discoverable through prefix-key help.
 :END:
 
 Distributed under the GNU General Public License version 3 (GPL-3.0).
+
+* Managed defaults
+
+=minaid-mode= applies the =(SYMBOL . VALUE)= alist in =minaid-settings= when
+enabled and restores the saved prior default values when disabled.  Customize
+=minaid-settings= before enabling =minaid-mode= to adjust or extend the managed
+defaults (minibuffer prompts, completion case handling, cycle thresholds,
+command filtering, and Ispell word completion).  The kill-ring transform
+composes with any existing =kill-transform-function= and is restored on disable.
