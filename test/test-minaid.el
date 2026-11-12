@@ -8,9 +8,12 @@
 (require 'cl-lib)
 (require 'minaid)
 (require 'comint)
+(require 'message)
 (require 'corfu-quick)
 
 (defvar which-key-mode)
+(defvar mu4e-compose-complete-addresses)
+(defvar mu4e-compose-mode-hook)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Alias and Keymap Tests
@@ -332,6 +335,79 @@
     (should (memq #'tempel-complete completion-at-point-functions))
     (should (memq #'cape-file completion-at-point-functions))
     (should (memq #'cape-dabbrev completion-at-point-functions))))
+
+(ert-deftest minaid-test/mail-capfs-use-text-setup ()
+  "Ordinary message buffers receive Minaid's text completion providers."
+  (let ((message-mode-hook '(minaid-text-mode-capf-setup)))
+    (with-temp-buffer
+      (message-mode)
+      (should (memq #'tempel-complete completion-at-point-functions))
+      (should (memq #'cape-emoji completion-at-point-functions))
+      (should (memq #'cape-file completion-at-point-functions)))))
+
+(ert-deftest minaid-test/text-capfs-accept-dictionary-lists-and-functions ()
+  "Text mode accepts dictionary sources used by derived mail modes."
+  (seq-do
+   (lambda (value)
+     (let ((cape-dict-file value))
+       (with-temp-buffer
+         (minaid-text-mode-capf-setup)
+         (should (memq #'cape-dict completion-at-point-functions)))))
+   (list (list (symbol-file 'minaid-mode))
+         (lambda () (error "Must not resolve eagerly")))))
+
+(ert-deftest minaid-test/mu4e-capfs-follow-address-completion-setting ()
+  "Mu4e contacts are present only when its completion option is enabled."
+  (skip-unless (locate-library "mu4e-compose"))
+  (require 'mu4e-compose)
+  (seq-do
+   (lambda (enabled)
+     (let ((text-mode-hook '(minaid-text-mode-capf-setup))
+           (message-mode-hook '(minaid-text-mode-capf-setup))
+           (mu4e-compose-mode-hook '(minaid-mu4e-capf-setup))
+           (mu4e-compose-complete-addresses enabled))
+       (with-temp-buffer
+         (mu4e-compose-mode)
+         (minaid-setup-capfs)
+         (should (memq #'cape-emoji completion-at-point-functions))
+         (should (memq #'tempel-complete completion-at-point-functions))
+         (should-not (memq #'mu4e--compose-complete-contact-field
+                           completion-at-point-functions))
+         (should (eq enabled (not (symbolp (car completion-at-point-functions))))))))
+   '(t nil)))
+
+(ert-deftest minaid-test/mu4e-capfs-enforce-contact-prefix-length ()
+  "The mu4e contact provider starts completing at four characters."
+  (let ((mu4e-compose-complete-addresses t))
+    (with-temp-buffer
+      (insert "abc")
+      (cl-letf (((symbol-function 'mu4e--compose-complete-contact-field)
+                 (lambda () (list (point-min) (point) '("abcd")))))
+        (minaid-mu4e-capf-setup)
+        (should-not (funcall (car completion-at-point-functions)))
+        (insert "d")
+        (should (funcall (car completion-at-point-functions)))))))
+
+(ert-deftest minaid-test/mail-capfs-lifecycle-and-manual-setup ()
+  "Minaid registers and removes mail hooks and dispatches mu4e buffers."
+  (let ((message-mode-hook nil)
+        (mu4e-compose-mode-hook nil)
+        (was-on minaid-mode))
+    (when was-on (minaid-mode -1))
+    (minaid-mode 1)
+    (unwind-protect
+        (progn
+          (should (memq #'minaid-text-mode-capf-setup message-mode-hook))
+          (should (memq #'minaid-mu4e-capf-setup mu4e-compose-mode-hook))
+          (with-temp-buffer
+            (message-mode)
+            (minaid-setup-capfs)
+            (should (memq #'cape-emoji completion-at-point-functions))))
+      (minaid-mode -1)
+      (unless was-on
+        (should-not (memq #'minaid-text-mode-capf-setup message-mode-hook))
+        (should-not (memq #'minaid-mu4e-capf-setup mu4e-compose-mode-hook)))
+      (when was-on (minaid-mode 1)))))
 
 (ert-deftest minaid-test/setup-capfs-eglot-minor-mode-detection ()
   "Test that setup-capfs detects bound-and-true-p eglot--managed-mode."
