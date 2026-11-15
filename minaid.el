@@ -499,11 +499,14 @@ Non-nil only while `minaid-mode' owns the minibuffer bindings.")
 (defun minaid-corfu-agent-shell-setup ()
   "Configure Corfu for `agent-shell-mode' buffers.
 Ensures prompt typing is not hijacked by ambient auto-completion while
-preserving explicit `@` file, `/` command, and TAB completion."
+preserving explicit `@` file, `/` command, dabbrev, and TAB completion."
   (corfu-mode 1)
   (setq-local corfu-auto nil)
   (setq-local corfu-quit-no-match t)
-  (setq-local corfu-quit-at-boundary t))
+  (setq-local corfu-quit-at-boundary t)
+  (setq-local corfu-auto-prefix minaid-corfu-text-auto-prefix)
+  (setq-local completion-at-point-functions
+              (cons #'cape-dabbrev (remq t completion-at-point-functions))))
 
 ;;;###autoload
 (defun minaid-corfu-at-point ()
