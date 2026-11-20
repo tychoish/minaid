@@ -509,13 +509,50 @@
     (should (= corfu-auto-prefix 3))))
 
 (ert-deftest minaid-test/corfu-agent-shell-setup ()
-  "Test that agent-shell corfu setup disables ambient auto-completion."
+  "Test that agent-shell corfu setup configures corfu, capfs, abbrev, and flyspell."
   (with-temp-buffer
     (minaid-corfu-agent-shell-setup)
     (should corfu-mode)
     (should-not corfu-auto)
     (should corfu-quit-no-match)
-    (should corfu-quit-at-boundary)))
+    (should corfu-quit-at-boundary)
+    (should abbrev-mode)
+    (should visual-line-mode)
+    (should (memq #'cape-dabbrev completion-at-point-functions))
+    (should (memq #'tempel-complete completion-at-point-functions))
+    (should (memq #'cape-file completion-at-point-functions))
+    (when (fboundp 'flyspell-mode)
+      (should flyspell-mode)
+      (should (eq flyspell-generic-check-word-predicate #'minaid--agent-shell-flyspell-verify)))))
+
+(ert-deftest minaid-test/agent-shell-flyspell-verify ()
+  "Test that agent-shell flyspell verification predicate ignores commands and mentions."
+  (with-temp-buffer
+    (insert "hello /commit @path/to/file normal")
+    (goto-char (point-min))
+    (search-forward "hello")
+    (should (minaid--agent-shell-flyspell-verify))
+    (search-forward "commit")
+    (should-not (minaid--agent-shell-flyspell-verify))
+    (search-forward "to")
+    (should-not (minaid--agent-shell-flyspell-verify))
+    (search-forward "file")
+    (should-not (minaid--agent-shell-flyspell-verify))
+    (search-forward "normal")
+    (should (minaid--agent-shell-flyspell-verify))))
+
+(ert-deftest minaid-test/corfu-orgx-capture-shell-setup ()
+  "Test that orgx-capture-shell corfu setup configures corfu, capfs, abbrev, and visual line."
+  (with-temp-buffer
+    (minaid-corfu-orgx-capture-shell-setup)
+    (should corfu-mode)
+    (should corfu-auto)
+    (should (= corfu-auto-prefix 1))
+    (should abbrev-mode)
+    (should visual-line-mode)
+    (should (memq #'cape-dabbrev completion-at-point-functions))
+    (should (memq #'tempel-complete completion-at-point-functions))
+    (should (memq #'cape-file completion-at-point-functions))))
 
 (ert-deftest minaid-test/corfu-enabled-in-all-buffers ()
   "Test that minaid-mode enables corfu in text, prog, fundamental, comint buffers."

@@ -83,6 +83,9 @@
 (declare-function project-root "project")
 (declare-function projectile-project-root "projectile")
 (declare-function annotated-completing-read-directory "annotated-completing-read")
+(declare-function flyspell-mode "flyspell")
+(defvar flyspell-generic-check-word-predicate)
+(defvar comint-last-prompt)
 
 (defvar embark-prompter)
 (defvar embark-quit-after-action)
@@ -467,6 +470,8 @@ Non-nil only while `minaid-mode' owns the minibuffer bindings.")
   (cond
    ((derived-mode-p 'mu4e-compose-mode) (minaid-mu4e-capf-setup))
    ((derived-mode-p 'message-mode) (minaid-text-mode-capf-setup))
+   ((derived-mode-p 'orgx-capture-shell-mode) (minaid-corfu-orgx-capture-shell-setup))
+   ((derived-mode-p 'agent-shell-mode) (minaid-corfu-agent-shell-setup))
    ((bound-and-true-p eglot--managed-mode) (minaid-eglot-capf-setup))
    ((derived-mode-p 'emacs-lisp-mode) (minaid-elisp-capf-setup))
    ((derived-mode-p 'prog-mode) (minaid-prog-mode-capf-setup))
@@ -496,17 +501,73 @@ Non-nil only while `minaid-mode' owns the minibuffer bindings.")
   (corfu-mode 1)
   (setq-local corfu-auto-prefix minaid-corfu-prog-auto-prefix))
 
+(defun minaid--agent-shell-flyspell-verify ()
+  "Verification predicate for `flyspell-mode' in `agent-shell-mode'.
+Returns non-nil if the word at point should be spellchecked.
+Ignores prompts, output before input start, slash commands, and `@' mentions."
+  (save-excursion
+    (let* ((proc (get-buffer-process (current-buffer)))
+           (pmark (and proc (process-mark proc)))
+           (input-start (cond
+                         ((and (boundp 'comint-last-prompt) comint-last-prompt)
+                          (marker-position (cdr comint-last-prompt)))
+                         (pmark (marker-position pmark))
+                         (t (point-min))))
+           (word-beg (progn (backward-word 1) (point))))
+      (and
+       (>= word-beg input-start)
+       (not (memq (char-before word-beg) '(?/ ?@)))
+       (not (looking-at-p "[/@][a-zA-Z0-9_.-]+"))
+       (save-excursion
+         (skip-chars-backward "^ \t\n\r")
+         (not (memq (char-after (point)) '(?@ ?/))))))))
+
+(put 'agent-shell-mode 'flyspell-mode-predicate #'minaid--agent-shell-flyspell-verify)
+
 (defun minaid-corfu-agent-shell-setup ()
-  "Configure Corfu for `agent-shell-mode' buffers.
+  "Configure Corfu and text-mode features for `agent-shell-mode' buffers.
 Ensures prompt typing is not hijacked by ambient auto-completion while
-preserving explicit `@` file, `/` command, dabbrev, and TAB completion."
+preserving explicit `@' file, `/' command, dabbrev, dictionary, tempel,
+file, and TAB completion."
   (corfu-mode 1)
   (setq-local corfu-auto nil)
   (setq-local corfu-quit-no-match t)
   (setq-local corfu-quit-at-boundary t)
   (setq-local corfu-auto-prefix minaid-corfu-text-auto-prefix)
   (setq-local completion-at-point-functions
-              (cons #'cape-dabbrev (remq t completion-at-point-functions))))
+              (thread-last
+                (append completion-at-point-functions
+                        (list #'cape-dabbrev
+                              (and (minaid--dictionary-available-p) #'cape-dict)
+                              #'tempel-complete
+                              #'cape-file))
+                (remq t)
+                (seq-filter #'identity)
+                (seq-uniq)))
+  (abbrev-mode 1)
+  (when (fboundp 'flyspell-mode)
+    (setq-local flyspell-generic-check-word-predicate
+                #'minaid--agent-shell-flyspell-verify)
+    (flyspell-mode 1))
+  (visual-line-mode 1))
+
+(defun minaid-corfu-orgx-capture-shell-setup ()
+  "Configure Corfu, Capfs, and text-mode features for `orgx-capture-shell-mode'."
+  (corfu-mode 1)
+  (setq-local corfu-auto t)
+  (setq-local corfu-auto-prefix 1)
+  (setq-local completion-at-point-functions
+              (thread-last
+                (append completion-at-point-functions
+                        (list #'cape-dabbrev
+                              (and (minaid--dictionary-available-p) #'cape-dict)
+                              #'tempel-complete
+                              #'cape-file))
+                (remq t)
+                (seq-filter #'identity)
+                (seq-uniq)))
+  (abbrev-mode 1)
+  (visual-line-mode 1))
 
 ;;;###autoload
 (defun minaid-corfu-at-point ()
@@ -884,6 +945,7 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
   (add-hook 'shell-mode-hook #'minaid-corfu-prog-mode-setup)
   (add-hook 'agent-shell-mode-hook #'minaid-corfu-agent-shell-setup)
   (add-hook 'agent-shell-queue-capture-mode-hook #'minaid-corfu-text-mode-setup)
+  (add-hook 'orgx-capture-shell-mode-hook #'minaid-corfu-orgx-capture-shell-setup)
 
   (setq tempel-path minaid-tempel-directory)
 
@@ -955,6 +1017,7 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
   (remove-hook 'shell-mode-hook #'minaid-corfu-prog-mode-setup)
   (remove-hook 'agent-shell-mode-hook #'minaid-corfu-agent-shell-setup)
   (remove-hook 'agent-shell-queue-capture-mode-hook #'minaid-corfu-text-mode-setup)
+  (remove-hook 'orgx-capture-shell-mode-hook #'minaid-corfu-orgx-capture-shell-setup)
   (dolist (buf (buffer-list))
     (when (buffer-live-p buf)
       (with-current-buffer buf
