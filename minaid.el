@@ -891,12 +891,14 @@ Returns STRING when non-empty, or nil to discard it from the kill ring."
     (unless minaid--xref-icons-prior
       (setq minaid--xref-icons-prior (list (bound-and-true-p nerd-icons-xref-mode))))
     (setq minaid--xref-icons-last (and nerd-icons-completion-mode t))
-    (nerd-icons-xref-mode (if minaid--xref-icons-last 1 -1))))
+    (when (or minaid--xref-icons-last (bound-and-true-p nerd-icons-xref-mode))
+      (nerd-icons-xref-mode (if minaid--xref-icons-last 1 -1)))))
 
 (defun minaid--restore-nerd-icons-xref ()
   "Restore xref icon state unless it was independently changed."
   (when (and minaid--xref-icons-prior
              (fboundp 'nerd-icons-xref-mode)
+             (not (eq (and (car minaid--xref-icons-prior) t) minaid--xref-icons-last))
              (eq (and (bound-and-true-p nerd-icons-xref-mode) t)
                  minaid--xref-icons-last))
     (nerd-icons-xref-mode (if (car minaid--xref-icons-prior) 1 -1)))

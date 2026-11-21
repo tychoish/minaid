@@ -142,15 +142,29 @@
 (ert-deftest minaid-test/xref-icons-follow-completion-mode ()
   "Synchronize xref icons to completion icons in both directions."
   (let ((nerd-icons-completion-mode t)
+        (nerd-icons-xref-mode nil)
+        (minaid--xref-icons-prior nil)
+        (minaid--xref-icons-last nil)
+        calls)
+    (cl-letf (((symbol-function 'nerd-icons-xref-mode)
+               (lambda (arg) (push arg calls) (setq nerd-icons-xref-mode (> arg 0)))))
+      (minaid--sync-nerd-icons-xref)
+      (setq nerd-icons-completion-mode nil)
+      (minaid--sync-nerd-icons-xref)
+      (should (equal calls '(-1 1))))))
+
+(ert-deftest minaid-test/xref-icons-inactive-does-not-call-mode ()
+  "Avoid loading an already inactive xref icon mode."
+  (let ((nerd-icons-completion-mode nil)
+        (nerd-icons-xref-mode nil)
         (minaid--xref-icons-prior nil)
         (minaid--xref-icons-last nil)
         calls)
     (cl-letf (((symbol-function 'nerd-icons-xref-mode)
                (lambda (arg) (push arg calls))))
       (minaid--sync-nerd-icons-xref)
-      (setq nerd-icons-completion-mode nil)
-      (minaid--sync-nerd-icons-xref)
-      (should (equal calls '(-1 1))))))
+      (minaid--restore-nerd-icons-xref)
+      (should-not calls))))
 
 (ert-deftest minaid-test/xref-icons-restore-prior-state ()
   "Restore the initial xref icon state after synchronization."
