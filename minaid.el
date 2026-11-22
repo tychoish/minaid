@@ -602,7 +602,7 @@ Prefers Projectile root, falling back to `project.el' and `default-directory'."
         (if (fboundp 'project-root)
             (project-root pr)
           (with-no-warnings (car (project-roots pr)))))
-      (if (and may-prompt (fboundp 'annotated-completing-read-directory))
+      (if (and may-prompt (not noninteractive) (fboundp 'annotated-completing-read-directory))
           (annotated-completing-read-directory :prompt "Project directory: ")
         default-directory)))
 
