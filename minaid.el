@@ -1034,7 +1034,7 @@ and Embark integrations."
   :global t
   :keymap minaid-global-map
   :group 'minaid
-  :lighter " minaid"
+  :lighter nil
   (if minaid-mode
       (minaid--enable)
     (minaid--disable)))
