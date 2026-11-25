@@ -377,8 +377,8 @@ Non-nil only while `minaid-mode' owns the minibuffer bindings.")
 (defun minaid--word-capfs ()
   "Return available word completion backends wrapped for comments and strings."
   (when (minaid--dictionary-available-p)
-    (list (cape-wrap-inside-comment #'cape-dict)
-          (cape-wrap-inside-string #'cape-dict))))
+    (list (cape-capf-inside-comment #'cape-dict)
+          (cape-capf-inside-string #'cape-dict))))
 
 (defun minaid-prog-mode-capf-setup ()
   "Configure buffer-local `completion-at-point-functions' for programming modes."
@@ -417,10 +417,10 @@ Non-nil only while `minaid-mode' owns the minibuffer bindings.")
   (setq-local completion-at-point-functions
               (thread-last
                 (list #'cape-elisp-symbol
-                      (cape-wrap-inside-code #'cape-elisp-block)
+                      (cape-capf-inside-code #'cape-elisp-block)
                       #'tempel-complete
                       #'cape-dabbrev
-                      (cape-wrap-inside-code #'cape-keyword)
+                      (cape-capf-inside-code #'cape-keyword)
                       (minaid--word-capfs)
                       #'cape-emoji)
                 (flatten-tree)
